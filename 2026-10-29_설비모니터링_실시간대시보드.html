@@ -1,0 +1,547 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>설비 실시간 상태 모니터링</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@300;400;500;700&display=swap" rel="stylesheet">
+<style>
+:root{
+  color-scheme:light dark;
+  --bg:#EDF0F3; --panel:#FFFFFF; --soft:#F4F6F8; --ink:#16202E; --muted:#5B6878; --line:#D7DDE4;
+  --ok:#0F9D8A; --warn:#D98A00; --bad:#D6453D; --idle:#7B8794; --trace:#1F4E8C;
+}
+@media (prefers-color-scheme:dark){
+  :root{
+    --bg:#0E151D; --panel:#16202B; --soft:#1B2735; --ink:#E7ECF2; --muted:#98A5B4; --line:#283443;
+    --ok:#2BC4AC; --warn:#F0B33A; --bad:#FF6B62; --idle:#8A97A6; --trace:#74AEF2;
+  }
+}
+*{box-sizing:border-box}
+html{-webkit-text-size-adjust:100%}
+body{margin:0;background:var(--bg);color:var(--ink);
+  font:14px/1.5 'Noto Sans KR','Pretendard','Malgun Gothic','Apple SD Gothic Neo',system-ui,sans-serif;
+  font-variant-numeric:tabular-nums}
+.ok{--c:var(--ok)} .warn{--c:var(--warn)} .bad{--c:var(--bad)} .idle{--c:var(--idle)}
+.wrap{max-width:1360px;margin:0 auto;padding:22px clamp(12px,3vw,28px) 40px}
+
+/* 헤더 */
+.top{display:flex;flex-wrap:wrap;gap:16px;justify-content:space-between;align-items:flex-end;margin-bottom:14px}
+h1{margin:0;font-size:clamp(22px,3vw,30px);font-weight:700;letter-spacing:-.01em;line-height:1.2}
+.sub{margin:4px 0 0;color:var(--muted);font-size:13px}
+.overall{display:flex;align-items:center;gap:12px;padding:10px 16px;border:1.5px solid var(--c);border-radius:12px;color:var(--c);background:var(--panel)}
+.overall .big{font-size:24px;font-weight:700;line-height:1}
+.overall .meta{font-size:12px;color:var(--muted);line-height:1.35}
+.dot{display:inline-block;width:9px;height:9px;border-radius:50%;background:currentColor;flex:none}
+
+/* 컨트롤 */
+.bar{display:flex;flex-wrap:wrap;gap:10px 16px;justify-content:space-between;align-items:center;margin-bottom:8px}
+.chips{display:flex;flex-wrap:wrap;gap:6px}
+.chip{display:inline-flex;align-items:center;gap:7px;padding:5px 12px;border:1px solid var(--line);border-radius:999px;background:var(--panel);
+  color:var(--ink);font:inherit;font-weight:500;cursor:pointer}
+.chip .dot{color:var(--c)}
+.chip[aria-pressed="true"]{background:var(--ink);color:var(--bg);border-color:var(--ink)}
+.chip[aria-pressed="true"] .dot{box-shadow:0 0 0 2px var(--bg)}
+.ctrls{display:flex;flex-wrap:wrap;gap:8px 12px;align-items:center;font-size:13px;color:var(--muted)}
+.ctrls label{display:inline-flex;align-items:center;gap:6px}
+select,.btn{font:inherit;color:var(--ink);background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:5px 10px}
+.btn{cursor:pointer;font-weight:500}
+.btn:hover,.chip:hover{background:var(--soft)}
+.chip[aria-pressed="true"]:hover{background:var(--ink)}
+.btn.on{background:var(--ink);color:var(--bg);border-color:var(--ink)}
+.grp{display:inline-flex;gap:4px}
+.sr{position:absolute;width:1px;height:1px;opacity:0;overflow:hidden}
+.filebtn:focus-within,.btn:focus-visible,.chip:focus-visible,select:focus-visible{outline:2px solid var(--trace);outline-offset:2px}
+.sync{font-size:12.5px;color:var(--muted);margin-bottom:10px;display:flex;flex-wrap:wrap;gap:4px 8px;align-items:center}
+.live{display:inline-flex;align-items:center;gap:6px;color:var(--c);font-weight:500}
+@media (prefers-reduced-motion:no-preference){
+  .live.ok .dot{animation:pulse 2s ease-out infinite}
+  @keyframes pulse{0%{box-shadow:0 0 0 0 color-mix(in srgb,var(--c) 55%,transparent)}70%,100%{box-shadow:0 0 0 7px transparent}}
+}
+
+/* 알림 */
+.notice{display:flex;gap:8px;align-items:flex-start;padding:8px 12px;margin-bottom:8px;border:1px solid var(--line);border-left:4px solid var(--c);
+  border-radius:8px;background:var(--panel);font-size:13px}
+.empty{padding:48px 16px;text-align:center;color:var(--muted);border:1px dashed var(--line);border-radius:12px;background:var(--panel)}
+.empty b{display:block;color:var(--ink);font-size:16px;margin-bottom:6px}
+
+/* 계기 레일 — 한 장의 패널 안에 5개 다이얼 */
+.rail{display:flex;flex-wrap:wrap;border:1px solid var(--line);border-radius:14px;background:var(--panel);overflow:hidden;margin-bottom:12px}
+.dial{flex:1 1 200px;padding:12px 14px 10px;box-shadow:1px 0 0 var(--line),0 1px 0 var(--line);min-width:0}
+.dh{display:flex;justify-content:space-between;align-items:center;gap:6px;margin-bottom:2px}
+.dl{font-weight:700;font-size:15px}
+.pill{display:inline-flex;align-items:center;gap:6px;padding:2px 9px;border-radius:999px;border:1px solid var(--c);color:var(--c);font-size:12px;font-weight:500;white-space:nowrap}
+.mm{display:grid;grid-template-columns:repeat(3,1fr);gap:4px;margin:2px 0 0;text-align:center}
+.mm div{min-width:0}
+.mm dt{font-size:11px;color:var(--muted)}
+.mm dd{margin:0;font-size:12.5px;font-weight:500}
+.dial svg{display:block;max-width:230px;margin:0 auto}
+.dv{font-size:22px;font-weight:500;fill:var(--ink)} .du{font-size:10px;fill:var(--muted)} .dz{font-size:9px;fill:var(--muted)}
+
+/* 추이 */
+.trend{display:grid;grid-template-columns:repeat(auto-fit,minmax(340px,1fr));gap:12px;margin-bottom:12px}
+.panel{border:1px solid var(--line);border-radius:10px;background:var(--panel);padding:12px 14px;min-width:0}
+.ph{display:flex;justify-content:space-between;align-items:baseline;gap:8px;flex-wrap:wrap;margin-bottom:4px}
+.ph h3{margin:0;font-size:14.5px;font-weight:700}
+.ph h3 small{font-weight:400;color:var(--muted);margin-left:4px}
+.ro{font-size:12px;color:var(--muted);text-align:right}
+.panel svg{display:block}
+.ax{font-size:10px;fill:var(--muted)}
+.xh{stroke:var(--ink);stroke-opacity:.45}
+.legend{list-style:none;margin:0;padding:0;font-size:13px;flex:1;min-width:0}
+.legend li{display:flex;align-items:center;gap:8px;padding:3px 0}
+.legend .sw{width:10px;height:10px;border-radius:2px;background:var(--c);flex:none}
+.legend .n{margin-left:auto;color:var(--muted)}
+.donut{display:flex;align-items:center;gap:14px;flex-wrap:wrap;margin-top:8px}
+.donut svg{width:120px;flex:none}
+.dc1{font-size:20px;font-weight:700;fill:var(--ink)} .dc2{font-size:9px;fill:var(--muted)}
+
+/* 하단 */
+.strip{margin-bottom:12px}
+.tl{display:flex;justify-content:space-between;font-size:11.5px;color:var(--muted);margin-top:4px}
+.two{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.25fr);gap:12px}
+@media (max-width:900px){.two{grid-template-columns:minmax(0,1fr)}}
+.scroll{overflow-x:auto}
+table{border-collapse:collapse;width:100%;font-size:12.5px}
+th,td{padding:6px 8px;text-align:right;white-space:nowrap;border-bottom:1px solid var(--line)}
+th{font-weight:500;color:var(--muted);font-size:12px}
+th:first-child,td:first-child{text-align:left}
+td.lg{text-align:left;white-space:normal}
+td.f1{color:var(--warn);font-weight:700} td.f2{color:var(--bad);font-weight:700}
+tbody tr:last-child td{border-bottom:0}
+.none{color:var(--muted);padding:14px 0;font-size:13px}
+footer{margin-top:16px;font-size:12px;color:var(--muted);line-height:1.6}
+footer b{color:var(--ink);font-weight:500}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header class="top">
+  <div>
+    <h1 id="h1">설비 실시간 상태 모니터링</h1>
+    <p class="sub" id="sub">Google Sheets 게시 CSV를 불러오는 중…</p>
+  </div>
+  <div id="overall" aria-live="polite"></div>
+</header>
+
+<div class="bar">
+  <div class="chips" id="chips" role="group" aria-label="설비 선택"></div>
+  <div class="ctrls">
+    <label>갱신 주기
+      <select id="poll">
+        <option value="5">5초</option><option value="10" selected>10초</option>
+        <option value="30">30초</option><option value="60">60초</option><option value="0">수동</option>
+      </select>
+    </label>
+    <label>표시 구간
+      <select id="win">
+        <option value="30">최근 30건</option><option value="60" selected>최근 60건</option>
+        <option value="120">최근 120건</option><option value="0">전체</option>
+      </select>
+    </label>
+    <button class="btn" id="btnRefresh" type="button">지금 갱신</button>
+    <span class="grp">
+      <button class="btn" id="btnReplay" type="button">재생(처음부터)</button>
+      <select id="speed" aria-label="재생 속도"><option value="1">×1</option><option value="5">×5</option><option value="20">×20</option></select>
+    </span>
+    <label class="btn filebtn">CSV 열기<input class="sr" type="file" id="file" accept=".csv,text/csv"></label>
+  </div>
+</div>
+
+<div class="sync" id="sync"></div>
+<div id="notices"></div>
+<div class="empty" id="empty"><b>데이터를 불러오는 중</b>게시된 시트의 CSV를 읽고 있음</div>
+
+<main id="main" hidden>
+  <section class="rail" id="rail" aria-label="현재 상태 계기"></section>
+  <section class="trend" id="trend" aria-label="지표별 추이"></section>
+  <section class="panel strip" id="timeline" aria-label="상태 이력"></section>
+  <section class="two">
+    <div class="panel" id="log"></div>
+    <div class="panel" id="recent"></div>
+  </section>
+</main>
+
+<footer id="foot"></footer>
+</div>
+
+<script>
+(function(){
+'use strict';
+
+/* ===== 설정 ===== */
+const CSV_URL='https://docs.google.com/spreadsheets/d/e/2PACX-1vQjaHinCRXyzxMs9UcV9lGOHINgLlfc7Usz0gaVWkPKzX0cHVr-gCZ9URMx3js1wMmkdhIv_fZ9m0v-/pub?output=csv';
+const METRICS=[
+  {key:'temp',    label:'온도',   unit:'°C',   dec:2},
+  {key:'vib',     label:'진동',   unit:'mm/s', dec:3},   // 단위는 시트에 없어 가정값
+  {key:'pressure',label:'압력',   unit:'bar',  dec:3},   // 단위는 시트에 없어 가정값
+  {key:'current', label:'전류',   unit:'A',    dec:2},
+  {key:'rpm',     label:'회전수', unit:'rpm',  dec:1}
+];
+const Z_WARN=2, Z_ALARM=3, Z_RANGE=4;   // 기준 대비 편차(σ) 임계값
+const LV_CLS=['ok','warn','bad'], LV_TXT=['정상','주의','이상'];
+
+/* ===== 유틸 ===== */
+const $=id=>document.getElementById(id);
+const esc=s=>String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const p2=n=>String(n).padStart(2,'0');
+const fmtShort=t=>{const d=new Date(t);return p2(d.getMonth()+1)+'-'+p2(d.getDate())+' '+p2(d.getHours())+':'+p2(d.getMinutes());};
+const fmtFull=t=>new Date(t).getFullYear()+'-'+fmtShort(t);
+const fmtClock=t=>{const d=new Date(t);return p2(d.getHours())+':'+p2(d.getMinutes())+':'+p2(d.getSeconds());};
+const fmtZ=z=>Math.abs(z)<0.05?'±0.0σ':(z>0?'+':'−')+Math.abs(z).toFixed(1)+'σ';
+const ago=ms=>{const m=Math.floor(ms/60000);if(m<1)return '방금';if(m<60)return m+'분 전';const h=Math.floor(m/60);return h<48?h+'시간 전':Math.floor(h/24)+'일 전';};
+
+function parseCSV(text){
+  const rows=[];let row=[],cur='',q=false;
+  for(let i=0;i<text.length;i++){
+    const c=text[i];
+    if(q){if(c==='"'){if(text[i+1]==='"'){cur+='"';i++;}else q=false;}else cur+=c;}
+    else if(c==='"')q=true;
+    else if(c===','){row.push(cur);cur='';}
+    else if(c==='\n'||c==='\r'){
+      if(c==='\r'&&text[i+1]==='\n')i++;
+      row.push(cur);cur='';
+      if(row.length>1||row[0]!=='')rows.push(row);
+      row=[];
+    }else cur+=c;
+  }
+  if(cur!==''||row.length){row.push(cur);if(row.length>1||row[0]!=='')rows.push(row);}
+  return rows;
+}
+function parseTs(s){
+  const m=/^(\d{4})[-/.](\d{1,2})[-/.](\d{1,2})[ T]+(\d{1,2}):(\d{2})(?::(\d{2}))?/.exec(String(s).trim());
+  if(m)return new Date(+m[1],+m[2]-1,+m[3],+m[4],+m[5],+(m[6]||0)).getTime();
+  const d=Date.parse(s);return isNaN(d)?null:d;
+}
+function ingest(text){
+  const t=parseCSV(text.replace(/^\uFEFF/,''));
+  if(t.length<2)throw new Error('CSV에 데이터 행이 없음');
+  const head=t[0].map(h=>h.trim().toLowerCase());
+  const need=['timestamp','equip_id','temp','vib','pressure','current','rpm','status'];
+  const miss=need.filter(k=>!head.includes(k));
+  if(miss.length)throw new Error('CSV 형식이 아님(누락 컬럼: '+miss.join(', ')+') — 시트의 웹 게시 설정 확인');
+  const ix={};need.forEach(k=>ix[k]=head.indexOf(k));
+  const out=[];let skipped=0;
+  for(let r=1;r<t.length;r++){
+    const c=t[r];const ts=parseTs(c[ix.timestamp]);
+    const o={ts:ts,equip:(c[ix.equip_id]||'').trim(),status:(c[ix.status]||'').trim().toUpperCase()};
+    let ok=ts!==null&&o.equip!=='';
+    METRICS.forEach(m=>{const v=parseFloat(c[ix[m.key]]);if(!isFinite(v))ok=false;o[m.key]=v;});
+    if(ok)out.push(o);else skipped++;
+  }
+  out.sort((a,b)=>a.ts-b.ts);
+  return {rows:out,skipped:skipped};
+}
+
+/* ===== 통계 (중앙값·MAD 기반 강건 기준) ===== */
+function median(a){const s=a.slice().sort((x,y)=>x-y),n=s.length;return n?(n%2?s[(n-1)/2]:(s[n/2-1]+s[n/2])/2):NaN;}
+function baseline(rows){
+  const b={};
+  METRICS.forEach(m=>{
+    const v=rows.map(r=>r[m.key]);const med=median(v);
+    let sd=median(v.map(x=>Math.abs(x-med)))*1.4826;
+    if(!(sd>0)){const mean=v.reduce((a,x)=>a+x,0)/v.length;sd=Math.sqrt(v.reduce((a,x)=>a+(x-mean)*(x-mean),0)/v.length);}
+    b[m.key]={c:med,s:sd>0?sd:null};
+  });
+  return b;
+}
+const zOf=(b,v)=>b.s?(v-b.c)/b.s:0;
+const levelOf=z=>{const a=Math.abs(z);return a>=Z_ALARM?2:a>=Z_WARN?1:0;};
+function sClass(s){
+  if(/^(RUN|RUNNING|ON|OK|NORMAL)$/.test(s))return 'ok';
+  if(/^(WARN|WARNING|CAUTION)$/.test(s))return 'warn';
+  if(/^(STOP|STOPPED|ALARM|FAULT|ERR|ERROR|FAIL|TRIP|DOWN)$/.test(s))return 'bad';
+  return 'idle';
+}
+const sLevel=s=>({ok:0,idle:0,warn:1,bad:2}[sClass(s)]);
+function rowEval(r,base){
+  let lv=sLevel(r.status);const flags=[];
+  METRICS.forEach(m=>{const z=zOf(base[m.key],r[m.key]);const l=levelOf(z);if(l){flags.push({m:m,z:z,l:l});if(l>lv)lv=l;}});
+  return {lv:lv,flags:flags};
+}
+
+/* ===== 상태 ===== */
+const S={rows:[],skipped:0,equip:null,win:60,poll:10,mode:'sheet',fileName:'',loading:false,err:null,
+  lastFetch:null,nextAt:0,newCount:0,hover:null,geo:{},timer:null,
+  replay:{on:false,idx:0,speed:1,timer:null}};
+const equipList=()=>Array.from(new Set(S.rows.map(r=>r.equip)));
+const equipRows=()=>S.rows.filter(r=>r.equip===S.equip);
+function viewRows(){let r=equipRows();if(S.replay.on)r=r.slice(0,S.replay.idx);return S.win>0?r.slice(-S.win):r;}
+
+/* ===== 데이터 로드 / 폴링 ===== */
+function applyText(text){
+  const res=ingest(text);
+  if(!res.rows.length)throw new Error('유효한 데이터 행이 없음');
+  const prevMax=S.rows.length?S.rows[S.rows.length-1].ts:null;
+  S.newCount=prevMax===null?0:res.rows.filter(r=>r.ts>prevMax).length;
+  S.rows=res.rows;S.skipped=res.skipped;
+  const eq=equipList();if(!eq.includes(S.equip))S.equip=eq[0];
+}
+async function load(){
+  if(S.loading)return;
+  S.loading=true;renderSync();
+  try{
+    const url=CSV_URL+(CSV_URL.indexOf('?')>=0?'&':'?')+'_t='+Date.now();
+    const res=await fetch(url,{cache:'no-store'});
+    if(!res.ok)throw new Error('HTTP '+res.status);
+    applyText(await res.text());
+    S.err=null;
+  }catch(e){S.err=e;}
+  finally{S.loading=false;S.lastFetch=Date.now();schedule();render();}
+}
+function schedule(){
+  clearTimeout(S.timer);S.nextAt=0;
+  if(S.mode==='sheet'&&S.poll>0){S.nextAt=Date.now()+S.poll*1000;S.timer=setTimeout(load,S.poll*1000);}
+}
+
+/* ===== 재생(리플레이) ===== */
+function startReplayTimer(){
+  clearInterval(S.replay.timer);
+  S.replay.timer=setInterval(()=>{
+    const n=equipRows().length;S.replay.idx++;
+    if(S.replay.idx>=n){S.replay.idx=n;stopReplay();return;}
+    renderSoon();
+  },1000/S.replay.speed);
+}
+function stopReplay(){clearInterval(S.replay.timer);S.replay.on=false;renderSoon();}
+function toggleReplay(){
+  if(S.replay.on){stopReplay();return;}
+  const n=equipRows().length;if(n<2)return;
+  S.replay.on=true;S.replay.idx=Math.min(10,n);S.hover=null;startReplayTimer();render();
+}
+
+/* ===== 그리기 보조 ===== */
+function polar(cx,cy,r,deg){const a=deg*Math.PI/180;return [cx+r*Math.cos(a),cy+r*Math.sin(a)];}
+function arcPath(cx,cy,r,a0,a1){
+  const p0=polar(cx,cy,r,a0),p1=polar(cx,cy,r,a1);
+  return 'M'+p0[0].toFixed(2)+' '+p0[1].toFixed(2)+'A'+r+' '+r+' 0 '+(Math.abs(a1-a0)>180?1:0)+' '+(a1>a0?1:0)+' '+p1[0].toFixed(2)+' '+p1[1].toFixed(2);
+}
+const zDeg=z=>135+(Math.max(-Z_RANGE,Math.min(Z_RANGE,z))+Z_RANGE)/(2*Z_RANGE)*270;
+
+function dial(m,b,last,view){
+  const v=last[m.key],z=zOf(b,v),lv=levelOf(z),cls=LV_CLS[lv];
+  const vals=view.map(r=>r[m.key]);const mn=Math.min.apply(null,vals),mx=Math.max.apply(null,vals);
+  const cx=80,cy=78,r=58;
+  const zones=[[-4,-3,'bad',.4],[-3,-2,'warn',.4],[-2,2,'ok',.2],[2,3,'warn',.4],[3,4,'bad',.4]];
+  const track=zones.map(zn=>'<path d="'+arcPath(cx,cy,r,zDeg(zn[0]),zDeg(zn[1]))+'" stroke="var(--'+zn[2]+')" stroke-opacity="'+zn[3]+'" stroke-width="9" fill="none"/>').join('');
+  const a1=zDeg(z);
+  const prog=Math.abs(a1-270)>0.6?'<path d="'+arcPath(cx,cy,r,270,a1)+'" stroke="var(--'+cls+')" stroke-width="9" fill="none" stroke-linecap="round"/>':'';
+  const k=polar(cx,cy,r,a1);
+  const tick='<line x1="80" x2="80" y1="'+(cy-r-8)+'" y2="'+(cy-r+8)+'" stroke="var(--ink)" stroke-opacity=".55" stroke-width="1.5"/>';
+  return '<article class="dial '+cls+'">'+
+    '<div class="dh"><span class="dl">'+m.label+'</span><span class="pill '+cls+'"><i class="dot"></i>'+LV_TXT[lv]+' · '+fmtZ(z)+'</span></div>'+
+    '<svg viewBox="0 0 160 128" width="100%" role="img" aria-label="'+m.label+' '+v.toFixed(m.dec)+' '+m.unit+', 기준 대비 '+fmtZ(z)+'">'+
+      track+prog+tick+
+      '<circle cx="'+k[0].toFixed(2)+'" cy="'+k[1].toFixed(2)+'" r="6" fill="var(--'+cls+')" stroke="var(--panel)" stroke-width="2"/>'+
+      '<text class="dv" x="80" y="82" text-anchor="middle">'+v.toFixed(m.dec)+'</text>'+
+      '<text class="du" x="80" y="98" text-anchor="middle">'+m.unit+'</text>'+
+      '<text class="dz" x="26" y="124" text-anchor="middle">−'+Z_RANGE+'σ</text>'+
+      '<text class="dz" x="134" y="124" text-anchor="middle">+'+Z_RANGE+'σ</text>'+
+    '</svg>'+
+    '<dl class="mm"><div><dt>기준</dt><dd>'+b.c.toFixed(m.dec)+'</dd></div><div><dt>구간 최소</dt><dd>'+mn.toFixed(m.dec)+'</dd></div><div><dt>구간 최대</dt><dd>'+mx.toFixed(m.dec)+'</dd></div></dl>'+
+  '</article>';
+}
+
+function chart(m,view,b){
+  const W=420,H=150,L=46,R=10,T=10,B=22,n=view.length;
+  const vals=view.map(r=>r[m.key]),ts=view.map(r=>r.ts),s=b.s||0;
+  let lo=Math.min.apply(null,vals.concat([b.c-3.4*s])),hi=Math.max.apply(null,vals.concat([b.c+3.4*s]));
+  if(!(hi>lo)){lo-=1;hi+=1;}
+  const pad=(hi-lo)*.05;lo-=pad;hi+=pad;
+  const x=i=>n>1?L+(W-L-R)*i/(n-1):L+(W-L-R)/2;
+  const y=v=>T+(H-T-B)*(1-(v-lo)/(hi-lo));
+  S.geo[m.key]={W:W,L:L,R:R,n:n,x:x,y:y,vals:vals,ts:ts,b:b};
+  let g='';
+  [lo,(lo+hi)/2,hi].forEach(t=>{
+    g+='<line x1="'+L+'" x2="'+(W-R)+'" y1="'+y(t).toFixed(1)+'" y2="'+y(t).toFixed(1)+'" stroke="var(--line)"/>'+
+       '<text class="ax" x="'+(L-6)+'" y="'+(y(t)+3).toFixed(1)+'" text-anchor="end">'+t.toFixed(Math.max(0,m.dec-1))+'</text>';
+  });
+  if(s){
+    g+='<rect x="'+L+'" y="'+y(b.c+Z_WARN*s).toFixed(1)+'" width="'+(W-L-R)+'" height="'+(y(b.c-Z_WARN*s)-y(b.c+Z_WARN*s)).toFixed(1)+'" fill="var(--ok)" fill-opacity=".10"/>';
+    [Z_ALARM,-Z_ALARM].forEach(k=>{g+='<line x1="'+L+'" x2="'+(W-R)+'" y1="'+y(b.c+k*s).toFixed(1)+'" y2="'+y(b.c+k*s).toFixed(1)+'" stroke="var(--bad)" stroke-opacity=".55" stroke-dasharray="4 3"/>';});
+  }
+  g+='<line x1="'+L+'" x2="'+(W-R)+'" y1="'+y(b.c).toFixed(1)+'" y2="'+y(b.c).toFixed(1)+'" stroke="var(--muted)" stroke-opacity=".6" stroke-dasharray="1 3"/>';
+  g+='<path d="'+vals.map((v,i)=>(i?'L':'M')+x(i).toFixed(1)+' '+y(v).toFixed(1)).join('')+'" fill="none" stroke="var(--trace)" stroke-width="1.6" stroke-linejoin="round"/>';
+  vals.forEach((v,i)=>{const l=levelOf(zOf(b,v));if(l)g+='<circle cx="'+x(i).toFixed(1)+'" cy="'+y(v).toFixed(1)+'" r="3" fill="var(--'+LV_CLS[l]+')"/>';});
+  g+='<circle cx="'+x(n-1).toFixed(1)+'" cy="'+y(vals[n-1]).toFixed(1)+'" r="3.5" fill="var(--ink)"/>';
+  if(n>1){
+    g+='<text class="ax" x="'+L+'" y="'+(H-6)+'">'+fmtShort(ts[0])+'</text><text class="ax" x="'+(W-R)+'" y="'+(H-6)+'" text-anchor="end">'+fmtShort(ts[n-1])+'</text>';
+  }
+  g+='<line class="xh" y1="'+T+'" y2="'+(H-B)+'" x1="0" x2="0" visibility="hidden"/><circle class="xd" r="4" fill="var(--panel)" stroke="var(--ink)" stroke-width="1.5" visibility="hidden"/>';
+  return '<section class="panel"><div class="ph"><h3>'+m.label+'<small>'+m.unit+'</small></h3><span class="ro" data-ro="'+m.key+'"></span></div>'+
+    '<svg data-chart="'+m.key+'" viewBox="0 0 '+W+' '+H+'" width="100%" role="img" aria-label="'+m.label+' 추이, 점선은 ±'+Z_ALARM+'σ">'+g+'</svg></section>';
+}
+
+function setHover(idx){
+  S.hover=idx;
+  METRICS.forEach(m=>{
+    const g=S.geo[m.key];if(!g)return;
+    const svg=document.querySelector('svg[data-chart="'+m.key+'"]');if(!svg)return;
+    const xh=svg.querySelector('.xh'),xd=svg.querySelector('.xd'),ro=document.querySelector('[data-ro="'+m.key+'"]');
+    const i=idx===null?g.n-1:idx,v=g.vals[i];
+    if(idx===null){xh.setAttribute('visibility','hidden');xd.setAttribute('visibility','hidden');}
+    else{
+      const px=g.x(i).toFixed(1);
+      xh.setAttribute('x1',px);xh.setAttribute('x2',px);xd.setAttribute('cx',px);xd.setAttribute('cy',g.y(v).toFixed(1));
+      xh.setAttribute('visibility','visible');xd.setAttribute('visibility','visible');
+    }
+    if(ro)ro.textContent=(idx===null?'최신':fmtShort(g.ts[i]))+' · '+v.toFixed(m.dec)+' '+m.unit+' ('+fmtZ(zOf(g.b,v))+')';
+  });
+}
+
+function donutCard(view){
+  const cnt={};view.forEach(r=>{cnt[r.status]=(cnt[r.status]||0)+1;});
+  const ent=Object.keys(cnt).map(k=>[k,cnt[k]]).sort((a,b)=>b[1]-a[1]);
+  const C=2*Math.PI*40;let acc=0;
+  const segs=ent.map(e=>{const len=e[1]/view.length*C;const s='<circle cx="60" cy="60" r="40" fill="none" stroke="var(--'+sClass(e[0])+')" stroke-width="16" stroke-dasharray="'+len.toFixed(2)+' '+(C-len).toFixed(2)+'" stroke-dashoffset="'+(-acc).toFixed(2)+'" transform="rotate(-90 60 60)"/>';acc+=len;return s;}).join('');
+  const okShare=view.filter(r=>sClass(r.status)==='ok').length/view.length*100;
+  const legend=ent.map(e=>'<li class="'+sClass(e[0])+'"><i class="sw"></i><span>'+esc(e[0]||'(빈 값)')+'</span><span class="n">'+e[1]+'건 · '+(e[1]/view.length*100).toFixed(0)+'%</span></li>').join('');
+  return '<section class="panel"><div class="ph"><h3>상태 분포<small>표시 구간 '+view.length+'건</small></h3></div>'+
+    '<div class="donut"><svg viewBox="0 0 120 120" role="img" aria-label="정상 상태 비율 '+okShare.toFixed(0)+'%">'+
+    '<circle cx="60" cy="60" r="40" fill="none" stroke="var(--line)" stroke-width="16"/>'+segs+
+    '<text class="dc1" x="60" y="62" text-anchor="middle">'+okShare.toFixed(0)+'%</text><text class="dc2" x="60" y="76" text-anchor="middle">정상 상태</text></svg>'+
+    '<ul class="legend">'+legend+'</ul></div></section>';
+}
+
+/* ===== 렌더 ===== */
+let raf=0;
+function renderSoon(){if(raf)return;raf=requestAnimationFrame(()=>{raf=0;render();});}
+
+function syncHTML(){
+  let cls='ok',txt='연결됨';
+  if(S.loading){cls='warn';txt='불러오는 중…';}
+  else if(S.err){cls='bad';txt='갱신 실패';}
+  else if(S.mode==='file'){cls='idle';txt='로컬 CSV';}
+  else if(!S.lastFetch){cls='warn';txt='대기';}
+  let s='<span class="live '+cls+'"><i class="dot"></i>'+txt+'</span>';
+  if(S.lastFetch)s+='<span>마지막 수신 '+fmtClock(S.lastFetch)+'</span>';
+  if(S.mode==='sheet'){
+    if(S.poll>0&&S.nextAt)s+='<span>· 다음 갱신 '+Math.max(0,Math.round((S.nextAt-Date.now())/1000))+'초 후</span>';
+    else if(S.poll===0)s+='<span>· 수동 갱신</span>';
+  }
+  return s;
+}
+function renderSync(){$('sync').innerHTML=syncHTML();}
+
+function notices(all,view){
+  const n=[];
+  if(S.err)n.push(['bad','갱신 실패: '+esc(S.err.message)+(S.rows.length?' — 마지막 정상 데이터를 표시 중임.':' — 네트워크·시트 게시 설정을 확인하거나 \'CSV 열기\'로 파일을 불러올 수 있음.')]);
+  if(S.mode==='file')n.push(['idle','로컬 CSV 표시 중('+esc(S.fileName)+') · 시트 폴링 중지됨. \'지금 갱신\'으로 시트에 다시 연결.']);
+  if(S.replay.on)n.push(['warn','재생 중 '+S.replay.idx+' / '+all.length+'건 · ×'+S.replay.speed+' — 저장된 데이터를 시간순으로 다시 흘려보내는 모드임.']);
+  if(all.length&&!S.replay.on){
+    const last=all[all.length-1].ts;
+    const gaps=[];for(let i=Math.max(1,all.length-20);i<all.length;i++)gaps.push(all[i].ts-all[i-1].ts);
+    const thr=Math.max(5*(median(gaps)||60000),5*60000),age=Date.now()-last;
+    if(age>thr)n.push(['warn','데이터 정체: 마지막 레코드 '+fmtFull(last)+' ('+ago(age)+'). 시트에 새 행이 추가되지 않았거나 게시 반영이 지연 중임.']);
+    else if(S.newCount>0)n.push(['ok','신규 '+S.newCount+'건 수신']);
+  }
+  if(S.skipped>0)n.push(['idle','형식 오류 '+S.skipped+'행 제외(빈 값·숫자 아님·시각 파싱 실패)']);
+  $('notices').innerHTML=n.map(x=>'<div class="notice '+x[0]+'">'+x[1]+'</div>').join('');
+}
+
+function render(){
+  const all=equipRows(),view=viewRows();
+  renderSync();
+  $('h1').textContent=(S.equip?S.equip+' ':'')+'실시간 상태 모니터링';
+  // 설비 칩
+  const eq=equipList();
+  $('chips').innerHTML=eq.map(id=>{
+    const rr=S.rows.filter(r=>r.equip===id),st=rr[rr.length-1].status;
+    return '<button type="button" class="chip '+sClass(st)+'" data-eq="'+esc(id)+'" aria-pressed="'+(id===S.equip)+'"><i class="dot"></i>'+esc(id)+'</button>';
+  }).join('');
+  $('btnReplay').textContent=S.replay.on?'재생 중지':'재생(처음부터)';
+  $('btnReplay').classList.toggle('on',S.replay.on);
+  notices(all,view);
+
+  if(!view.length){
+    $('main').hidden=true;$('foot').innerHTML='';$('overall').innerHTML='';
+    const e=$('empty');e.hidden=false;
+    e.innerHTML=S.err?'<b>데이터를 불러오지 못함</b>'+esc(S.err.message):'<b>데이터를 불러오는 중</b>게시된 시트의 CSV를 읽고 있음';
+    $('sub').textContent='Google Sheets 게시 CSV';
+    return;
+  }
+  $('empty').hidden=true;$('main').hidden=false;
+
+  const base=baseline(all),last=view[view.length-1],ev=rowEval(last,base);
+  const okCnt=METRICS.length-ev.flags.length;
+  $('overall').innerHTML='<div class="overall '+LV_CLS[ev.lv]+'"><i class="dot"></i><div><div class="big">'+LV_TXT[ev.lv]+'</div></div>'+
+    '<div class="meta">상태 '+esc(last.status)+'<br>지표 '+okCnt+'/'+METRICS.length+' 정상</div></div>';
+  $('sub').textContent=(S.mode==='file'?'로컬 CSV':'Google Sheets 게시 CSV')+' · 전체 '+all.length+'건 · 최신 데이터 '+fmtFull(last.ts);
+
+  $('rail').innerHTML=METRICS.map(m=>dial(m,base[m.key],last,view)).join('');
+  S.geo={};
+  $('trend').innerHTML=METRICS.map(m=>chart(m,view,base[m.key])).join('')+donutCard(view);
+  setHover(S.hover!==null&&S.hover<view.length?S.hover:null);
+
+  // 상태 이력
+  const w=1000/view.length;
+  $('timeline').innerHTML='<div class="ph"><h3>상태 이력<small>표시 구간</small></h3></div>'+
+    '<svg viewBox="0 0 1000 22" preserveAspectRatio="none" width="100%" height="22" shape-rendering="crispEdges" role="img" aria-label="상태 이력">'+
+    view.map((r,i)=>'<rect x="'+(i*w).toFixed(2)+'" y="0" width="'+(w+0.4).toFixed(2)+'" height="22" fill="var(--'+sClass(r.status)+')"/>').join('')+'</svg>'+
+    '<div class="tl"><span>'+fmtShort(view[0].ts)+'</span><span>'+fmtShort(last.ts)+'</span></div>';
+
+  // 이벤트 로그
+  const evs=[];
+  for(let i=view.length-1;i>=0;i--){const e=rowEval(view[i],base);if(e.lv>0)evs.push({r:view[i],e:e});}
+  $('log').innerHTML='<div class="ph"><h3>이상 이벤트<small>표시 구간 '+evs.length+'건</small></h3></div>'+
+    (evs.length?'<div class="scroll"><table><thead><tr><th>시각</th><th>수준</th><th style="text-align:left">내용</th></tr></thead><tbody>'+
+      evs.slice(0,8).map(x=>{
+        const parts=[];
+        if(sLevel(x.r.status)>0)parts.push('상태 '+esc(x.r.status));
+        x.e.flags.forEach(f=>parts.push(f.m.label+' '+x.r[f.m.key].toFixed(f.m.dec)+f.m.unit+' ('+fmtZ(f.z)+')'));
+        return '<tr><td>'+fmtShort(x.r.ts)+'</td><td><span class="pill '+LV_CLS[x.e.lv]+'">'+LV_TXT[x.e.lv]+'</span></td><td class="lg">'+parts.join(', ')+'</td></tr>';
+      }).join('')+'</tbody></table></div>':
+      '<p class="none">표시 구간에서 편차 이벤트 없음 (|편차| &lt; '+Z_WARN+'σ, 상태 정상).</p>');
+
+  // 최근 레코드
+  $('recent').innerHTML='<div class="ph"><h3>최근 레코드<small>최신 10건</small></h3></div><div class="scroll"><table><thead><tr><th>시각</th><th>상태</th>'+
+    METRICS.map(m=>'<th>'+m.label+'<br>('+m.unit+')</th>').join('')+'</tr></thead><tbody>'+
+    view.slice(-10).reverse().map(r=>'<tr><td>'+fmtShort(r.ts)+'</td><td><span class="pill '+sClass(r.status)+'">'+esc(r.status||'-')+'</span></td>'+
+      METRICS.map(m=>{const l=levelOf(zOf(base[m.key],r[m.key]));return '<td'+(l?' class="f'+l+'"':'')+'>'+r[m.key].toFixed(m.dec)+'</td>';}).join('')+'</tr>').join('')+
+    '</tbody></table></div>';
+
+  $('foot').innerHTML='<b>산정 기준</b> — 기준값은 '+esc(S.equip)+' 전체 수신 '+all.length+'건의 중앙값, 편차(σ)는 MAD×1.4826(강건 표준편차)으로 계산. '+
+    '|편차| ≥ '+Z_WARN+'σ 주의, ≥ '+Z_ALARM+'σ 이상이며 상태 컬럼의 WARN/STOP/ALARM 계열도 반영. 차트의 녹색 띠는 ±'+Z_WARN+'σ, 붉은 점선은 ±'+Z_ALARM+'σ. '+
+    '단위(°C·mm/s·bar·A·rpm)는 시트에 없어 가정값이며, 설비 사양 한계값을 알면 코드 상단 설정에서 교체.';
+}
+
+/* ===== 이벤트 연결 ===== */
+$('trend').addEventListener('pointermove',e=>{
+  const svg=e.target.closest?e.target.closest('svg[data-chart]'):null;if(!svg)return;
+  const g=S.geo[svg.dataset.chart];if(!g||g.n<1)return;
+  const rc=svg.getBoundingClientRect();const vx=(e.clientX-rc.left)/rc.width*g.W;
+  let i=g.n>1?Math.round((vx-g.L)/(g.W-g.L-g.R)*(g.n-1)):0;i=Math.max(0,Math.min(g.n-1,i));
+  if(i!==S.hover)setHover(i);
+});
+$('trend').addEventListener('pointerleave',()=>setHover(null));
+$('chips').addEventListener('click',e=>{
+  const b=e.target.closest('[data-eq]');if(!b)return;
+  if(S.replay.on){clearInterval(S.replay.timer);S.replay.on=false;}
+  S.equip=b.dataset.eq;S.hover=null;render();
+});
+$('poll').addEventListener('change',e=>{S.poll=+e.target.value;schedule();render();});
+$('win').addEventListener('change',e=>{S.win=+e.target.value;S.hover=null;render();});
+$('speed').addEventListener('change',e=>{S.replay.speed=+e.target.value;if(S.replay.on)startReplayTimer();render();});
+$('btnRefresh').addEventListener('click',()=>{S.mode='sheet';S.fileName='';clearTimeout(S.timer);load();});
+$('btnReplay').addEventListener('click',toggleReplay);
+$('file').addEventListener('change',async e=>{
+  const f=e.target.files[0];if(!f)return;
+  try{
+    applyText(await f.text());
+    S.mode='file';S.fileName=f.name;S.err=null;S.lastFetch=Date.now();
+    clearTimeout(S.timer);S.nextAt=0;
+    if(S.replay.on){clearInterval(S.replay.timer);S.replay.on=false;}
+  }catch(err){S.err=err;}
+  e.target.value='';render();
+});
+setInterval(renderSync,1000);
+
+render();
+load();
+})();
+</script>
+</body>
+</html>
